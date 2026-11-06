@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# ESP-IDF
+firmware*/build/
+firmware*/.cache/
+firmware*/sdkconfig.old
+
+# Training checkpoints (final_model.zip is kept)
+models/**/*_steps.zip

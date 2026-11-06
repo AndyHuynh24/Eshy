@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Eshy Controller</title>
+<style>
+  :root {
+    --bg: #0e1220;
+    --panel: #161b30;
+    --accent: #4cd2c1;
+    --warn: #ff5563;
+    --text: #e7eaf3;
+    --muted: #6e7591;
+    --btn: #232a45;
+    --btn-press: #3aa18c;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%; width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 -apple-system, system-ui, sans-serif;
+    overflow: hidden;
+    user-select: none;
+    touch-action: none;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid #00000050;
+  }
+  header .title { font-weight: 600; letter-spacing: 0.5px; }
+  header .status { font-size: 12px; color: var(--muted); }
+  header .status.ok { color: var(--accent); }
+  header .status.bad { color: var(--warn); }
+  button.connect {
+    background: var(--accent); color: #0e1220;
+    border: 0; border-radius: 6px;
+    padding: 8px 16px; font-weight: 600;
+    cursor: pointer;
+  }
+  button.connect.connected { background: var(--warn); color: white; }
+
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    height: calc(100vh - 56px);
+    padding: 24px;
+    gap: 24px;
+  }
+
+  /* D-pad on the left */
+  .dpad-zone, .skill-zone {
+    display: flex; align-items: center; justify-content: center;
+  }
+  .dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 64px);
+    grid-template-rows: repeat(3, 64px);
+    gap: 8px;
+  }
+  .dpad .btn {
+    background: var(--btn); border: 0;
+    color: var(--text); font-size: 22px; font-weight: bold;
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: background 60ms;
+  }
+  .dpad .btn:active, .dpad .btn.pressed {
+    background: var(--btn-press); color: #0e1220;
+  }
+  .dpad .up    { grid-column: 2; grid-row: 1; }
+  .dpad .left  { grid-column: 1; grid-row: 2; }
+  .dpad .right { grid-column: 3; grid-row: 2; }
+  .dpad .down  { grid-column: 2; grid-row: 3; }
+
+  /* Skill buttons on the right */
+  .skills {
+    display: grid;
+    grid-template-columns: repeat(2, 88px);
+    grid-template-rows: repeat(2, 88px);
+    gap: 12px;
+  }
+  .skills .btn {
+    background: var(--btn); border: 0;
+    color: var(--text); font-weight: 600;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 60ms;
+    font-size: 14px;
+  }
+  .skills .btn:active, .skills .btn.pressed {
+    background: var(--btn-press); color: #0e1220;
+  }
+
+  .log {
+    position: fixed;
+    bottom: 8px; left: 8px;
+    font-size: 11px; color: var(--muted);
+    background: #00000060;
+    padding: 4px 8px;
+    border-radius: 4px;
+    max-width: 60vw;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">🐾 Eshy Controller</div>
+  <div class="status" id="status">disconnected</div>
+  <button class="connect" id="connect">Connect</button>
+</header>
+
+<main>
+  <section class="dpad-zone">
+    <div class="dpad">
+      <button class="btn up"    data-cmd="walk_fwd"  data-rate="40">▲</button>
+      <button class="btn left"  data-cmd="turn_left" data-rate="40">◀</button>
+      <button class="btn right" data-cmd="turn_right" data-rate="40">▶</button>
+      <button class="btn down"  data-cmd="walk_back" data-rate="40">▼</button>
+    </div>
+  </section>
+
+  <section class="skill-zone">
+    <div class="skills">
+      <button class="btn" data-cmd="sit">Sit</button>
+      <button class="btn" data-cmd="lay">Lay</button>
+      <button class="btn" data-cmd="stand" style="grid-column:1; grid-row:2;">Stand</button>
+      <button class="btn" data-cmd="dance" style="grid-column:2; grid-row:2;">Dance</button>
+    </div>
+  </section>
+</main>
+
+<div class="log" id="log">Connect to start.</div>
+
+<script>
+// =====================================================================
+// Nordic UART Service (Eshy firmware speaks this)
+// =====================================================================
+const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const NUS_RX_CHAR = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';   // write
+const NUS_TX_CHAR = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';   // notify
+
+let device = null, server = null, rxChar = null, txChar = null;
+const statusEl = document.getElementById('status');
+const connectBtn = document.getElementById('connect');
+const logEl = document.getElementById('log');
+
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = 'status ' + (cls || '');
+}
+function log(msg) {
+  logEl.textContent = msg;
+  console.log('[Eshy]', msg);
+}
+
+// =====================================================================
+// BLE connection
+// =====================================================================
+async function connect() {
+  try {
+    log('Scanning…');
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ name: 'Eshy' }, { namePrefix: 'TechTalkies' }],
+      optionalServices: [NUS_SERVICE],
+    });
+    device.addEventListener('gattserverdisconnected', onDisconnect);
+    log('Connecting to ' + device.name);
+    server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(NUS_SERVICE);
+    rxChar = await svc.getCharacteristic(NUS_RX_CHAR);
+    txChar = await svc.getCharacteristic(NUS_TX_CHAR);
+    await txChar.startNotifications();
+    txChar.addEventListener('characteristicvaluechanged', onTelemetry);
+    setStatus('connected', 'ok');
+    connectBtn.textContent = 'Disconnect';
+    connectBtn.classList.add('connected');
+    log('Connected.');
+  } catch (e) {
+    log('Connect failed: ' + e.message);
+    setStatus('disconnected', 'bad');
+  }
+}
+
+function disconnect() {
+  if (device && device.gatt.connected) device.gatt.disconnect();
+}
+
+function onDisconnect() {
+  setStatus('disconnected', 'bad');
+  connectBtn.textContent = 'Connect';
+  connectBtn.classList.remove('connected');
+  rxChar = txChar = server = null;
+  log('Disconnected.');
+}
+
+function onTelemetry(ev) {
+  // (Optional) show any incoming telemetry strings for debugging.
+  // const text = new TextDecoder().decode(ev.target.value);
+  // log('rx: ' + text.trim().slice(0, 60));
+}
+
+connectBtn.addEventListener('click', () => {
+  if (rxChar) disconnect(); else connect();
+});
+
+// =====================================================================
+// Send helpers
+// =====================================================================
+const enc = new TextEncoder();
+async function send(s) {
+  if (!rxChar) return;
+  try {
+    await rxChar.writeValueWithoutResponse(enc.encode(s));
+  } catch (e) {
+    log('write failed: ' + e.message);
+  }
+}
+
+// =====================================================================
+// Command map — single source of truth.
+// Edit these strings (sent verbatim to the firmware over BLE) when you
+// add new firmware-side commands.  `\n` terminates each line.
+// =====================================================================
+const COMMANDS = {
+  // D-pad — sent repeatedly while held, released sends 'release'.
+  walk_fwd:    'w\n',
+  walk_back:   'b\n',
+  turn_left:   't\n',
+  turn_right:  'T\n',
+
+  // Skill buttons (one-shot — single press triggers the behavior).
+  sit:         'S\n',
+  lay:         'L\n',
+  stand:       'c\n',     // 'c' = center / standing
+  dance:       'd\n',
+
+  // Sent when any held direction button is released.
+  release:     'c\n',
+};
+
+// =====================================================================
+// Button event wiring — hold-to-repeat for d-pad, one-shot for skills.
+// =====================================================================
+function makeHoldButton(btn) {
+  const cmd  = COMMANDS[btn.dataset.cmd];
+  const rate = parseInt(btn.dataset.rate, 10) || 40;   // ms between sends
+  let timer = null;
+
+  function press(e) {
+    e.preventDefault();
+    btn.classList.add('pressed');
+    if (timer) return;
+    send(cmd);
+    timer = setInterval(() => send(cmd), rate);
+  }
+  function release(e) {
+    if (e) e.preventDefault();
+    btn.classList.remove('pressed');
+    if (timer) { clearInterval(timer); timer = null; }
+    send(COMMANDS.release);
+  }
+
+  // mouse + touch + leave-window
+  btn.addEventListener('pointerdown', press);
+  btn.addEventListener('pointerup',   release);
+  btn.addEventListener('pointerleave', release);
+  btn.addEventListener('pointercancel', release);
+}
+
+function makeOneShotButton(btn) {
+  const cmd = COMMANDS[btn.dataset.cmd];
+  btn.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    btn.classList.add('pressed');
+    send(cmd);
+  });
+  btn.addEventListener('pointerup', e => {
+    e.preventDefault();
+    btn.classList.remove('pressed');
+  });
+  btn.addEventListener('pointerleave', () => btn.classList.remove('pressed'));
+}
+
+document.querySelectorAll('.dpad .btn').forEach(makeHoldButton);
+document.querySelectorAll('.skills .btn').forEach(makeOneShotButton);
+</script>
+</body>
+</html>
