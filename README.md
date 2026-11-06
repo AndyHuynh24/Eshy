@@ -1,5 +1,7 @@
 # Eshy — RL-Trained Quadruped Robot
 
+https://github.com/user-attachments/assets/afd2cbcb-715b-4916-834a-9237a6f70c31
+
 A 116 g, 4-DOF quadruped that learns to walk and sit with reinforcement
 learning. Each skill is trained with PPO in a MuJoCo model of the robot, then
 run on the real hardware over BLE.
