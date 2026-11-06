@@ -4,10 +4,6 @@ A 116 g, 4-DOF quadruped that learns to walk and sit with reinforcement
 learning. Each skill is trained with PPO in a MuJoCo model of the robot, then
 run on the real hardware over BLE.
 
-| Walk | Sit | Turn (in progress) |
-|---|---|---|
-| ![walk](videos/walk/step_03000060_dist_0.47m.mp4) | ![sit](videos/sit/step_03000060_dist_-0.04m.mp4) | ![turn](videos/turn/step_03000060_dist_-0.00m.mp4) |
-
 ## Hardware
 
 - Seeed XIAO ESP32-S3 Sense
